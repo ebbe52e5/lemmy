@@ -710,6 +710,7 @@ diesel::table! {
         post_score -> Int4,
         comment_count -> Int4,
         comment_score -> Int4,
+        follower_count -> Int4,
     }
 }
 
@@ -736,6 +737,18 @@ diesel::table! {
         comment_id -> Nullable<Int4>,
         id -> Int4,
         community_id -> Int4,
+    }
+}
+
+diesel::table! {
+    person_follow (id) {
+        id -> Int4,
+        person_id -> Int4,
+        target_id -> Int4,
+        active -> Bool,
+        published_at -> Timestamptz,
+        followed_at -> Timestamptz,
+        unfollowed_at -> Nullable<Timestamptz>,
     }
 }
 
@@ -1130,6 +1143,7 @@ diesel::allow_tables_to_appear_in_same_query!(
   site,
   site_language,
   person_actions,
+  person_follow,
   image_details,
 );
 diesel::allow_tables_to_appear_in_same_query!(custom_emoji, custom_emoji_keyword,);

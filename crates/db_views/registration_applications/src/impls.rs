@@ -289,6 +289,7 @@ mod tests {
         post_score: 0,
         comment_count: 0,
         comment_score: 0,
+        follower_count: 0,
       },
       admin: None,
     };
@@ -363,6 +364,7 @@ mod tests {
       post_score: 0,
       comment_count: 0,
       comment_score: 0,
+      follower_count: 0,
     });
     assert_eq!(read_sara_app_view_after_approve, expected_sara_app_view);
 

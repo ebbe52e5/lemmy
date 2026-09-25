@@ -19,6 +19,7 @@ pub enum LemmyErrorType {
   NotAnAdmin,
   CantBlockYourself,
   CantNoteYourself,
+  CantFollowYourself,
   CantBlockAdmin,
   PasswordsDoNotMatch,
   EmailNotVerified,

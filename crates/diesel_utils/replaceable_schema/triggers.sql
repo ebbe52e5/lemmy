@@ -277,6 +277,25 @@ WHERE
 RETURN NULL;
 END;
 $$);
+-- Count active followers for people. Unfollowing only sets `active` to false instead of deleting the row,
+-- so filtering on `active` makes that update count as -1 (and refollowing as +1).
+CALL r.create_triggers ('person_follow', $$
+BEGIN
+    UPDATE
+        person AS a
+    SET
+        follower_count = a.follower_count + diff.follower_count
+    FROM (
+        SELECT
+            (person_follow).target_id, coalesce(sum(count_diff), 0) AS follower_count
+        FROM select_old_and_new_rows AS old_and_new_rows
+        WHERE (person_follow).active GROUP BY (person_follow).target_id) AS diff
+WHERE
+    a.id = diff.target_id
+        AND diff.follower_count != 0;
+RETURN NULL;
+END;
+$$);
 CALL r.create_triggers ('post_report', $$
 BEGIN
     UPDATE

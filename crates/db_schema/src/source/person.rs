@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 #[cfg(feature = "full")]
 use i_love_jesus::CursorKeysModule;
 #[cfg(feature = "full")]
-use lemmy_db_schema_file::schema::{person, person_actions};
+use lemmy_db_schema_file::schema::{person, person_actions, person_follow};
 use lemmy_db_schema_file::{InstanceId, PersonId};
 use lemmy_diesel_utils::{dburl::DbUrl, sensitive::SensitiveString};
 use serde::{Deserialize, Serialize};
@@ -59,6 +59,8 @@ pub struct Person {
   pub comment_count: i32,
   #[serde(skip)]
   pub comment_score: i32,
+  /// The number of people actively following this person (local follows only).
+  pub follower_count: i32,
 }
 
 #[derive(Clone, derive_new::new)]
@@ -183,4 +185,39 @@ pub struct PersonNoteForm {
   pub note: String,
   #[new(value = "Utc::now()")]
   pub noted_at: DateTime<Utc>,
+}
+
+/// A local (non-federated) follow of one person by another.
+///
+/// Rows are never deleted on unfollow: `active` is set to false instead, so past
+/// follow relationships are kept. There is at most one row per (person_id, target_id).
+#[skip_serializing_none]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "full", derive(Queryable, Selectable, Identifiable))]
+#[cfg_attr(feature = "full", diesel(table_name = person_follow))]
+#[cfg_attr(feature = "full", diesel(check_for_backend(diesel::pg::Pg)))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-rs", ts(optional_fields, export))]
+pub struct PersonFollow {
+  pub id: i32,
+  /// The follower.
+  pub person_id: PersonId,
+  /// The person being followed.
+  pub target_id: PersonId,
+  /// Whether the follow is currently in effect.
+  pub active: bool,
+  /// When the person was first followed.
+  pub published_at: DateTime<Utc>,
+  /// When the person was most recently (re)followed.
+  pub followed_at: DateTime<Utc>,
+  /// When the person was most recently unfollowed. None while active.
+  pub unfollowed_at: Option<DateTime<Utc>>,
+}
+
+#[derive(derive_new::new)]
+#[cfg_attr(feature = "full", derive(Insertable))]
+#[cfg_attr(feature = "full", diesel(table_name = person_follow))]
+pub struct PersonFollowForm {
+  pub person_id: PersonId,
+  pub target_id: PersonId,
 }

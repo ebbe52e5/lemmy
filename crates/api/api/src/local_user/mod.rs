@@ -4,6 +4,7 @@ pub mod block;
 pub mod change_password;
 pub mod change_password_after_reset;
 pub mod export_data;
+pub mod follow_person;
 pub mod generate_totp_secret;
 pub mod get_captcha;
 pub mod list_hidden;

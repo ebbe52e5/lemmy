@@ -22,6 +22,7 @@ use crate::{
     multi_community_follow,
     person,
     person_actions,
+    person_follow,
     post,
     post_actions,
   },
@@ -162,6 +163,17 @@ pub fn my_person_actions_join(my_person_id: Option<PersonId>) -> _ {
       .nullable()
       .eq(my_person_id)
       .and(person_actions::target_id.eq(person::id)),
+  )
+}
+
+/// The logged in user's local follow of `person`, if any (including inactive, unfollowed rows).
+#[diesel::dsl::auto_type]
+pub fn my_person_follow_join(my_person_id: Option<PersonId>) -> _ {
+  person_follow::table.on(
+    person_follow::person_id
+      .nullable()
+      .eq(my_person_id)
+      .and(person_follow::target_id.eq(person::id)),
   )
 }
 

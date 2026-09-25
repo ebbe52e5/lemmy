@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use lemmy_db_schema::source::{
   community::CommunityActions,
-  person::{Person, PersonActions},
+  person::{Person, PersonActions, PersonFollow},
 };
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
@@ -56,4 +56,7 @@ pub struct PersonView {
   // Same as for CommunityView to hide optional community_actions for unrelated queries
   #[cfg_attr(feature = "full", diesel(embed))]
   pub community_actions: Option<CommunityActions>,
+  /// The logged in user's local follow of this person. Check `active` for the current state.
+  #[cfg_attr(feature = "full", diesel(embed))]
+  pub person_follow: Option<PersonFollow>,
 }

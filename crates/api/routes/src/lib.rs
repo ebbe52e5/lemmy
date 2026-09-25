@@ -39,6 +39,7 @@ use lemmy_api::{
     change_password::change_password,
     change_password_after_reset::change_password_after_reset,
     export_data::export_user_data,
+    follow_person::follow_person,
     generate_totp_secret::generate_totp_secret,
     get_captcha::get_captcha,
     list_hidden::list_person_hidden,
@@ -422,7 +423,8 @@ pub fn config(cfg: &mut ServiceConfig, rate_limit: &RateLimit) {
           .route("", get().to(read_person))
           .route("/list", get().to(list_persons))
           .route("/content", get().to(list_person_content))
-          .route("/note", post().to(user_note_person)),
+          .route("/note", post().to(user_note_person))
+          .route("/follow", post().to(follow_person)),
       )
       // Admin Actions
       .service(

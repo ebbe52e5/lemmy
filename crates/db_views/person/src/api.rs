@@ -51,6 +51,15 @@ pub struct BlockPerson {
   pub block: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-rs", ts(optional_fields, export))]
+/// Follow or unfollow a person (local only, not federated).
+pub struct FollowPerson {
+  pub person_id: PersonId,
+  pub follow: bool,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ts-rs", ts(optional_fields, export))]

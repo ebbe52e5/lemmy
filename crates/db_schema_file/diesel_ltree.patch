@@ -11,11 +11,12 @@ index 4e6418b95..d38a412e3 100644
  
      comment (id) {
          id -> Int4,
-@@ -1079,5 +1079,7 @@ diesel::allow_tables_to_appear_in_same_query!(
+@@ -1079,5 +1079,8 @@ diesel::allow_tables_to_appear_in_same_query!(
    report_combined,
    site,
    site_language,
 +  person_actions,
++  person_follow,
 +  image_details,
  );
  diesel::allow_tables_to_appear_in_same_query!(custom_emoji, custom_emoji_keyword,);

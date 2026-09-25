@@ -4,6 +4,8 @@ use crate::{
     Person,
     PersonActions,
     PersonBlockForm,
+    PersonFollow,
+    PersonFollowForm,
     PersonFollowerForm,
     PersonInsertForm,
     PersonNoteForm,
@@ -12,7 +14,7 @@ use crate::{
   traits::{ApubActor, Blockable, Followable},
   utils::format_actor_url,
 };
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use diesel::{
   ExpressionMethods,
   JoinOnDsl,
@@ -26,7 +28,7 @@ use lemmy_db_schema_file::{
   InstanceId,
   PersonId,
   newtypes::{CommunityId, LocalUserId},
-  schema::{instance, instance_actions, local_user, person, person_actions},
+  schema::{instance, instance_actions, local_user, person, person_actions, person_follow},
 };
 use lemmy_diesel_utils::{
   connection::{DbPool, get_conn},
@@ -253,6 +255,48 @@ impl Followable for PersonActions {
   }
 }
 
+impl PersonFollow {
+  /// Follow a person, or re-activate a previous follow of them.
+  pub async fn follow(pool: &mut DbPool<'_>, form: &PersonFollowForm) -> LemmyResult<Self> {
+    let conn = &mut get_conn(pool).await?;
+    insert_into(person_follow::table)
+      .values(form)
+      .on_conflict((person_follow::person_id, person_follow::target_id))
+      .do_update()
+      .set((
+        person_follow::active.eq(true),
+        person_follow::followed_at.eq(Utc::now()),
+        person_follow::unfollowed_at.eq(None::<DateTime<Utc>>),
+      ))
+      .returning(Self::as_select())
+      .get_result::<Self>(conn)
+      .await
+      .with_lemmy_type(LemmyErrorType::CouldntUpdate)
+  }
+
+  /// Unfollow a person. The row is kept and only marked inactive.
+  pub async fn unfollow(
+    pool: &mut DbPool<'_>,
+    person_id: PersonId,
+    target_id: PersonId,
+  ) -> LemmyResult<usize> {
+    let conn = &mut get_conn(pool).await?;
+    diesel::update(
+      person_follow::table
+        .filter(person_follow::person_id.eq(person_id))
+        .filter(person_follow::target_id.eq(target_id))
+        .filter(person_follow::active),
+    )
+    .set((
+      person_follow::active.eq(false),
+      person_follow::unfollowed_at.eq(Utc::now()),
+    ))
+    .execute(conn)
+    .await
+    .with_lemmy_type(LemmyErrorType::CouldntUpdate)
+  }
+}
+
 impl Blockable for PersonActions {
   type Form = PersonBlockForm;
   type ObjectIdType = PersonId;
@@ -417,7 +461,15 @@ mod tests {
     source::{
       comment::{Comment, CommentActions, CommentInsertForm, CommentLikeForm, CommentUpdateForm},
       community::{Community, CommunityInsertForm},
-      person::{Person, PersonActions, PersonFollowerForm, PersonInsertForm, PersonUpdateForm},
+      person::{
+        Person,
+        PersonActions,
+        PersonFollow,
+        PersonFollowForm,
+        PersonFollowerForm,
+        PersonInsertForm,
+        PersonUpdateForm,
+      },
       post::{Post, PostActions, PostInsertForm, PostLikeForm},
     },
     test_data::TestData,
@@ -459,6 +511,7 @@ mod tests {
       post_score: 0,
       comment_count: 0,
       comment_score: 0,
+      follower_count: 0,
     };
 
     let read_person = Person::read(pool, data.person.id).await?;
@@ -504,6 +557,52 @@ mod tests {
       PersonActions::unfollow(pool, follow_form.person_id, follow_form.target_id).await?;
     assert_eq!(UpleteCount::only_deleted(1), unfollow);
 
+    data.delete(pool).await?;
+    Ok(())
+  }
+
+  #[tokio::test]
+  #[serial]
+  async fn person_follow() -> LemmyResult<()> {
+    let pool = &build_db_pool_for_tests();
+    let pool = &mut pool.into();
+    let data = TestData::create(pool).await?;
+
+    let follower_form = PersonInsertForm::test_form(data.instance.id, "person_follow_follower");
+    let follower = Person::create(pool, &follower_form).await?;
+    let form = PersonFollowForm::new(follower.id, data.person.id);
+
+    let followed = PersonFollow::follow(pool, &form).await?;
+    assert!(followed.active);
+    assert_eq!(None, followed.unfollowed_at);
+    assert_eq!(1, Person::read(pool, data.person.id).await?.follower_count);
+
+    // Unfollowing keeps the row and only marks it inactive
+    assert_eq!(
+      1,
+      PersonFollow::unfollow(pool, follower.id, data.person.id).await?
+    );
+    assert_eq!(0, Person::read(pool, data.person.id).await?.follower_count);
+    // Unfollowing again is a no-op and doesn't decrement the count twice
+    assert_eq!(
+      0,
+      PersonFollow::unfollow(pool, follower.id, data.person.id).await?
+    );
+    assert_eq!(0, Person::read(pool, data.person.id).await?.follower_count);
+
+    // Refollowing reuses the same row
+    let refollowed = PersonFollow::follow(pool, &form).await?;
+    assert_eq!(followed.id, refollowed.id);
+    assert_eq!(followed.published_at, refollowed.published_at);
+    assert!(refollowed.active);
+    assert_eq!(None, refollowed.unfollowed_at);
+    assert_eq!(1, Person::read(pool, data.person.id).await?.follower_count);
+
+    // Following while already following doesn't count twice
+    PersonFollow::follow(pool, &form).await?;
+    assert_eq!(1, Person::read(pool, data.person.id).await?.follower_count);
+
+    Person::delete(pool, follower.id).await?;
     data.delete(pool).await?;
     Ok(())
   }

@@ -27,6 +27,7 @@ use lemmy_db_schema_file::{
     creator_home_instance_actions_join,
     creator_local_instance_actions_join,
     my_person_actions_join,
+    my_person_follow_join,
     person_community_actions_join,
   },
   newtypes::CommunityId,
@@ -71,6 +72,7 @@ impl PersonView {
     let creator_local_instance_actions_join: creator_local_instance_actions_join =
       creator_local_instance_actions_join(local_instance_id);
     let my_person_actions_join: my_person_actions_join = my_person_actions_join(my_person_id);
+    let my_person_follow_join: my_person_follow_join = my_person_follow_join(my_person_id);
     let person_community_actions_join: person_community_actions_join =
       person_community_actions_join(community_id);
     person::table
@@ -79,6 +81,7 @@ impl PersonView {
       .left_join(creator_home_instance_actions_join())
       .left_join(creator_local_instance_actions_join)
       .left_join(person_community_actions_join)
+      .left_join(my_person_follow_join)
   }
 
   pub async fn read(

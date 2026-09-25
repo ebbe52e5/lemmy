@@ -2,7 +2,7 @@ pub use lemmy_db_schema::{
   PersonContentType,
   source::{
     local_user::LocalUser,
-    person::{Person, PersonActions},
+    person::{Person, PersonActions, PersonFollow},
   },
 };
 pub use lemmy_db_schema_file::{PersonId, newtypes::LocalUserId};
@@ -14,7 +14,7 @@ pub use lemmy_db_views_person::{
 
 pub mod actions {
   pub use lemmy_db_schema_file::newtypes::PersonContentCombinedId;
-  pub use lemmy_db_views_person::api::{BlockPerson, NotePerson};
+  pub use lemmy_db_views_person::api::{BlockPerson, FollowPerson, NotePerson};
   pub use lemmy_db_views_person_content_combined::ListPersonContent;
 
   pub mod moderation {
