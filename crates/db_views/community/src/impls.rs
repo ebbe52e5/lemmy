@@ -152,7 +152,8 @@ impl CommunityQuery<'_> {
 
     if let Some(listing_type) = self.listing_type {
       query = match listing_type {
-        ListingType::All => query,
+        // Following only applies to post listings
+        ListingType::All | ListingType::Following => query,
         ListingType::Subscribed => query.filter(filter_is_subscribed()),
         ListingType::Local => query.filter(community::local.eq(true)),
         ListingType::ModeratorView => {

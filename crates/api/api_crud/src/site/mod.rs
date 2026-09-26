@@ -10,8 +10,14 @@ pub fn site_default_post_listing_type_check(
   default_post_listing_type: &Option<ListingType>,
 ) -> LemmyResult<()> {
   if let Some(listing_type) = default_post_listing_type {
-    // Dont allow Subscribed or ModeratorView as default listing type
-    if [ListingType::Subscribed, ListingType::ModeratorView].contains(listing_type) {
+    // Dont allow Subscribed, ModeratorView or Following as default listing type
+    if [
+      ListingType::Subscribed,
+      ListingType::ModeratorView,
+      ListingType::Following,
+    ]
+    .contains(listing_type)
+    {
       Err(LemmyErrorType::InvalidDefaultPostListingType.into())
     } else {
       Ok(())
@@ -59,6 +65,7 @@ mod tests {
     assert!(site_default_post_listing_type_check(&Some(ListingType::All)).is_ok());
     assert!(site_default_post_listing_type_check(&Some(ListingType::Local)).is_ok());
     assert!(site_default_post_listing_type_check(&Some(ListingType::Subscribed)).is_err());
+    assert!(site_default_post_listing_type_check(&Some(ListingType::Following)).is_err());
   }
 
   #[test]

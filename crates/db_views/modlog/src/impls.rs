@@ -167,7 +167,8 @@ impl ModlogQuery<'_> {
     }
 
     query = match self.listing_type.unwrap_or(ListingType::All) {
-      ListingType::All => query,
+      // Following only applies to post listings
+      ListingType::All | ListingType::Following => query,
       ListingType::Subscribed => query.filter(filter_is_subscribed()),
       ListingType::Local => query.filter(community::local.eq(true)),
       ListingType::ModeratorView => {

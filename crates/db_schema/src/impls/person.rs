@@ -274,6 +274,21 @@ impl PersonFollow {
       .with_lemmy_type(LemmyErrorType::CouldntUpdate)
   }
 
+  /// The ids of people the person actively follows.
+  pub async fn list_followed_person_ids(
+    pool: &mut DbPool<'_>,
+    person_id: PersonId,
+  ) -> LemmyResult<Vec<PersonId>> {
+    let conn = &mut get_conn(pool).await?;
+    person_follow::table
+      .filter(person_follow::person_id.eq(person_id))
+      .filter(person_follow::active)
+      .select(person_follow::target_id)
+      .get_results(conn)
+      .await
+      .with_lemmy_type(LemmyErrorType::NotFound)
+  }
+
   /// Unfollow a person. The row is kept and only marked inactive.
   pub async fn unfollow(
     pool: &mut DbPool<'_>,

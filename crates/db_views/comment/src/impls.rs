@@ -227,7 +227,9 @@ impl CommentQuery<'_> {
           query
         }
       }
-      ListingType::All => query.filter(filter_unlisted_or_followed()),
+      // Following only applies to post listings. Treat it as All here so e.g. a post's
+      // comments still load for someone whose default listing type is Following.
+      ListingType::All | ListingType::Following => query.filter(filter_unlisted_or_followed()),
       ListingType::ModeratorView => {
         // Pre-fetch the moderator view community ids, since the join is too costly
         let community_ids = if let Some(my_person_id) = my_person_id {

@@ -32,8 +32,16 @@ use lemmy_db_schema::{
     language::Language,
     local_site::{LocalSite, LocalSiteUpdateForm},
     local_user::{LocalUser, LocalUserInsertForm, LocalUserUpdateForm},
-    multi_community::{MultiCommunity, MultiCommunityInsertForm},
-    person::{Person, PersonActions, PersonBlockForm, PersonInsertForm, PersonNoteForm},
+    multi_community::{MultiCommunity, MultiCommunityFollowForm, MultiCommunityInsertForm},
+    person::{
+      Person,
+      PersonActions,
+      PersonBlockForm,
+      PersonFollow,
+      PersonFollowForm,
+      PersonInsertForm,
+      PersonNoteForm,
+    },
     post::{Post, PostActions, PostHideForm, PostInsertForm, PostLikeForm, PostUpdateForm},
     site::Site,
   },
@@ -2388,6 +2396,154 @@ async fn post_listing_multi_community(data: &mut Data) -> LemmyResult<()> {
   .list(pool, &data.site, &updated_local_site)
   .await?;
   assert_eq!(listing.items, suggested.items);
+
+  Ok(())
+}
+
+#[test_context(Data)]
+#[tokio::test]
+#[serial]
+async fn post_listing_following(data: &mut Data) -> LemmyResult<()> {
+  let pool = &data.pool();
+  let pool = &mut pool.into();
+
+  // john follows tegan, and a multi-community containing community_a (but not community_b)
+  let form = CommunityInsertForm::new(
+    data.instance.id,
+    "following_community_a".to_string(),
+    "pubkey".to_string(),
+  );
+  let community_a = Community::create(pool, &form).await?;
+  let form = CommunityInsertForm::new(
+    data.instance.id,
+    "following_community_b".to_string(),
+    "pubkey".to_string(),
+  );
+  let community_b = Community::create(pool, &form).await?;
+
+  let form = MultiCommunityInsertForm::new(
+    data.tegan.person.id,
+    data.tegan.person.instance_id,
+    "following multi".to_string(),
+    String::new(),
+  );
+  let multi = MultiCommunity::create(pool, &form).await?;
+  MultiCommunity::update_entries(pool, multi.id, &vec![community_a.id]).await?;
+
+  // Matches only via the followed multi-community
+  let form = PostInsertForm::new(
+    "john in community_a".to_string(),
+    data.john.person.id,
+    community_a.id,
+  );
+  let post_via_multi = Post::create(pool, &form).await?;
+  // Matches only via the followed person
+  let form = PostInsertForm::new(
+    "tegan in community_b".to_string(),
+    data.tegan.person.id,
+    community_b.id,
+  );
+  let post_via_person = Post::create(pool, &form).await?;
+  // Matches via both, and must still be listed once
+  let form = PostInsertForm::new(
+    "tegan in community_a".to_string(),
+    data.tegan.person.id,
+    community_a.id,
+  );
+  let post_via_both = Post::create(pool, &form).await?;
+  // Matches neither
+  let form = PostInsertForm::new(
+    "bot in community_b".to_string(),
+    data.bot.person.id,
+    community_b.id,
+  );
+  Post::create(pool, &form).await?;
+
+  PersonFollow::follow(
+    pool,
+    &PersonFollowForm::new(data.john.person.id, data.tegan.person.id),
+  )
+  .await?;
+  let multi_follow = |follow_state| MultiCommunityFollowForm {
+    multi_community_id: multi.id,
+    person_id: data.john.person.id,
+    follow_state,
+  };
+  MultiCommunity::follow(pool, &multi_follow(CommunityFollowerState::Accepted)).await?;
+
+  let following_query = PostQuery {
+    listing_type: Some(ListingType::Following),
+    sort: Some(PostSortType::New),
+    local_user: Some(&data.john.local_user),
+    ..Default::default()
+  };
+  let list_ids = |listing: &[PostView]| listing.iter().map(|p| p.post.id).collect::<Vec<_>>();
+
+  // Tegan's posts in the fixture community come via the followed person too
+  let tegan_post_ids = HashSet::from([
+    data.post.id,
+    data.post_with_tags.id,
+    post_via_person.id,
+    post_via_both.id,
+  ]);
+  let mut expected = tegan_post_ids.clone();
+  expected.insert(post_via_multi.id);
+
+  let listing = list_ids(
+    &following_query
+      .clone()
+      .list(pool, &data.site, &data.local_site)
+      .await?,
+  );
+  assert_eq!(expected.len(), listing.len(), "no post is listed twice");
+  assert_eq!(expected, listing.iter().cloned().collect::<HashSet<_>>());
+
+  // Paging one post at a time also lists each post exactly once
+  let mut paged = vec![];
+  let mut page_cursor = None;
+  loop {
+    let page = PostQuery {
+      page_cursor,
+      limit: Some(1),
+      ..following_query.clone()
+    }
+    .list(pool, &data.site, &data.local_site)
+    .await?;
+    paged.extend(list_ids(&page));
+    if page.next_page.is_none() {
+      break;
+    }
+    page_cursor = page.next_page;
+  }
+  assert_eq!(listing, paged);
+
+  // A multi-community follow that isn't accepted yet doesn't count
+  MultiCommunity::follow(pool, &multi_follow(CommunityFollowerState::Pending)).await?;
+  let listing = following_query
+    .clone()
+    .list(pool, &data.site, &data.local_site)
+    .await?;
+  assert_eq!(
+    tegan_post_ids,
+    list_ids(&listing).into_iter().collect::<HashSet<_>>()
+  );
+
+  // After unfollowing (the row is kept, marked inactive) nothing is followed
+  PersonFollow::unfollow(pool, data.john.person.id, data.tegan.person.id).await?;
+  let listing = following_query
+    .clone()
+    .list(pool, &data.site, &data.local_site)
+    .await?;
+  assert!(listing.is_empty());
+
+  // Logged out, nothing is followed
+  let listing = PostQuery {
+    local_user: None,
+    ..following_query.clone()
+  }
+  .list(pool, &data.site, &data.local_site)
+  .await?;
+  assert!(listing.is_empty());
 
   Ok(())
 }

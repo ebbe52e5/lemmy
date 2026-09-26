@@ -24,7 +24,7 @@ use lemmy_db_schema::{
     local_site::LocalSite,
     local_user::LocalUser,
     multi_community::MultiCommunityEntry,
-    person::Person,
+    person::{Person, PersonFollow},
     post::{Post, PostActions, post_actions_keys as pa_key, post_keys as key},
     site::Site,
   },
@@ -372,11 +372,39 @@ impl PostQuery<'_> {
               Some(vec![])
             }
           }
+          // Following also matches posts by followed people outside these communities, so it
+          // can't be expressed as a community id filter. See `prefetch_following`.
+          ListingType::Following => None,
         }
       }
     };
 
     Ok(community_ids)
+  }
+
+  /// For the Following listing type, pre-fetches the ids of people the user follows and of the
+  /// communities in multi-communities they follow. Posts matching either are shown.
+  ///
+  /// Returns None when not listing Following. The lists are applied with `eq_any` (not joins),
+  /// so a post that matches both (or is in several followed multi-communities) is returned once.
+  async fn prefetch_following(
+    &self,
+    pool: &mut DbPool<'_>,
+  ) -> LemmyResult<Option<(Vec<PersonId>, Vec<CommunityId>)>> {
+    if self.community_id.is_some()
+      || self.multi_community_id.is_some()
+      || self.listing_type != Some(ListingType::Following)
+    {
+      return Ok(None);
+    }
+    let Some(my_person_id) = self.local_user.person_id() else {
+      // Nothing is followed when logged out
+      return Ok(Some((vec![], vec![])));
+    };
+    let person_ids = PersonFollow::list_followed_person_ids(pool, my_person_id).await?;
+    let community_ids =
+      MultiCommunityEntry::list_followed_community_ids(pool, my_person_id).await?;
+    Ok(Some((person_ids, community_ids)))
   }
 
   pub async fn list(
@@ -387,6 +415,7 @@ impl PostQuery<'_> {
   ) -> LemmyResult<PagedResponse<PostView>> {
     // Pre-fetching some important items, to prevent costly joins.
     let community_ids = self.prefetch_community_ids(pool, local_site).await?;
+    let following = self.prefetch_following(pool).await?;
     let language_ids = LocalUserLanguage::read_opt(pool, self.local_user.map(|l| l.id)).await?;
 
     let limit = limit_fetch(self.limit, None)?;
@@ -421,6 +450,16 @@ impl PostQuery<'_> {
     //  Filter by the given community ids, prefetched above
     if let Some(community_ids) = &community_ids {
       query = query.filter(post::community_id.eq_any(community_ids));
+    }
+
+    // Following: posts by followed people or in followed multi-communities' communities. Empty
+    // lists match nothing.
+    if let Some((person_ids, following_community_ids)) = following {
+      query = query.filter(
+        post::creator_id
+          .eq_any(person_ids)
+          .or(post::community_id.eq_any(following_community_ids)),
+      );
     }
 
     // Filter by the creator id

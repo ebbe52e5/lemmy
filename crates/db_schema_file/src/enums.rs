@@ -70,6 +70,9 @@ pub enum ListingType {
   ModeratorView,
   /// Communities which are recommended by local instance admins
   Suggested,
+  /// Posts by people you follow, or in communities of multi-communities you follow.
+  /// Only supported for post listings.
+  Following,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default, Hash)]

@@ -25,6 +25,7 @@ use diesel::{
 use diesel_async::RunQueryDsl;
 use lemmy_db_schema_file::{
   PersonId,
+  enums::CommunityFollowerState,
   newtypes::{CommunityId, MultiCommunityId},
   schema::{
     community,
@@ -353,6 +354,30 @@ impl MultiCommunityEntry {
     multi_community_entry::table
       .filter(multi_community_entry::multi_community_id.eq(id))
       .select(multi_community_entry::community_id)
+      .get_results(conn)
+      .await
+      .with_lemmy_type(LemmyErrorType::NotFound)
+  }
+
+  /// The distinct community ids across all (non-deleted) multi-communities that the person has
+  /// an accepted follow of.
+  pub async fn list_followed_community_ids(
+    pool: &mut DbPool<'_>,
+    person_id: PersonId,
+  ) -> LemmyResult<Vec<CommunityId>> {
+    let conn = &mut get_conn(pool).await?;
+
+    let followed_multi_ids = multi_community_follow::table
+      .inner_join(multi_community::table)
+      .filter(multi_community_follow::person_id.eq(person_id))
+      .filter(multi_community_follow::follow_state.eq(CommunityFollowerState::Accepted))
+      .filter(multi_community::deleted.eq(false))
+      .select(multi_community_follow::multi_community_id);
+
+    multi_community_entry::table
+      .filter(multi_community_entry::multi_community_id.eq_any(followed_multi_ids))
+      .select(multi_community_entry::community_id)
+      .distinct()
       .get_results(conn)
       .await
       .with_lemmy_type(LemmyErrorType::NotFound)
