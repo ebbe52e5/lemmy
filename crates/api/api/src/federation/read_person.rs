@@ -5,7 +5,7 @@ use lemmy_api_utils::{
   context::LemmyContext,
   utils::{check_private_instance, is_admin, read_site_for_actor},
 };
-use lemmy_db_schema::MultiCommunitySortType;
+use lemmy_db_schema::{MultiCommunitySortType, source::community::Community};
 use lemmy_db_views_community::impls::MultiCommunityQuery;
 use lemmy_db_views_community_moderator::CommunityModeratorView;
 use lemmy_db_views_local_user::LocalUserView;
@@ -63,6 +63,15 @@ pub async fn read_person(
   .await?
   .items;
 
+  // Creators are only recorded by the zhifou.io Lemmy fork
+  let communities_created = Community::list_created_by(
+    &mut context.pool(),
+    person_details_id,
+    my_person_id,
+    is_admin,
+  )
+  .await?;
+
   let site = read_site_for_actor(person_view.person.ap_id.clone(), &context).await?;
 
   Ok(Json(GetPersonDetailsResponse {
@@ -70,5 +79,6 @@ pub async fn read_person(
     site,
     moderates,
     multi_communities_created,
+    communities_created,
   }))
 }

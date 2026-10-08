@@ -180,6 +180,7 @@ diesel::table! {
         report_count -> Int2,
         unresolved_report_count -> Int2,
         local_removed -> Bool,
+        creator_id -> Nullable<Int4>,
     }
 }
 
@@ -1027,6 +1028,7 @@ diesel::joinable!(comment_actions -> comment (comment_id));
 diesel::joinable!(comment_actions -> person (person_id));
 diesel::joinable!(comment_report -> comment (comment_id));
 diesel::joinable!(community -> instance (instance_id));
+diesel::joinable!(community -> person (creator_id));
 diesel::joinable!(community_actions -> community (community_id));
 diesel::joinable!(community_language -> community (community_id));
 diesel::joinable!(community_language -> language (language_id));

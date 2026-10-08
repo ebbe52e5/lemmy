@@ -1,0 +1,3 @@
+ALTER TABLE community
+    DROP COLUMN creator_id;
+

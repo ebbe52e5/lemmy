@@ -95,6 +95,9 @@ pub struct Community {
   pub report_count: i16,
   pub unresolved_report_count: i16,
   pub local_removed: bool,
+  /// Who created this local community. Only in the zhifou.io Lemmy fork. It's None for remote
+  /// communities, and for those created before the fork recorded it.
+  pub creator_id: Option<PersonId>,
 }
 
 #[derive(Debug, Clone, derive_new::new)]
@@ -146,6 +149,8 @@ pub struct CommunityInsertForm {
   pub summary: Option<String>,
   #[new(default)]
   pub local_removed: Option<bool>,
+  #[new(default)]
+  pub creator_id: Option<PersonId>,
 }
 
 #[derive(Debug, Clone, Default)]

@@ -114,6 +114,8 @@ pub async fn create_community(
     featured_url: Some(generate_featured_url(&ap_id)?),
     posting_restricted_to_mods: data.posting_restricted_to_mods,
     visibility: data.visibility,
+    // zhifou.io Lemmy fork: record the creator
+    creator_id: Some(local_user_view.person.id),
     ..CommunityInsertForm::new(site.instance_id, data.name.clone(), keypair.public_key)
   };
 

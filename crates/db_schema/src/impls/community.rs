@@ -119,6 +119,36 @@ pub enum CollectionType {
 }
 
 impl Community {
+  /// The communities a person created, oldest first (zhifou.io Lemmy fork). Like the communities
+  /// they moderate, deleted ones are only shown to the creator, and removed ones only to admins.
+  pub async fn list_created_by(
+    pool: &mut DbPool<'_>,
+    creator_id: PersonId,
+    my_person_id: Option<PersonId>,
+    is_admin: bool,
+  ) -> LemmyResult<Vec<Self>> {
+    let conn = &mut get_conn(pool).await?;
+    let mut query = community::table
+      .filter(community::creator_id.eq(creator_id))
+      .order_by(community::published_at)
+      .select(Self::as_select())
+      .into_boxed();
+
+    if my_person_id != Some(creator_id) {
+      query = query.filter(community::deleted.eq(false));
+    }
+    if !is_admin {
+      query = query
+        .filter(community::removed.eq(false))
+        .filter(community::local_removed.eq(false));
+    }
+
+    query
+      .load(conn)
+      .await
+      .with_lemmy_type(LemmyErrorType::NotFound)
+  }
+
   pub async fn insert_apub(
     pool: &mut DbPool<'_>,
     timestamp: DateTime<Utc>,
@@ -748,6 +778,7 @@ mod tests {
       unresolved_report_count: 0,
       interactions_month: 0,
       local_removed: false,
+      creator_id: None,
     };
 
     let community_follower_form = CommunityFollowerForm::new(
@@ -835,6 +866,64 @@ mod tests {
     assert_eq!(UpleteCount::only_deleted(1), unban);
     // assert_eq!(2, loaded_count);
     assert_eq!(1, num_deleted);
+
+    Ok(())
+  }
+
+  /// Creators are only recorded by the zhifou.io Lemmy fork.
+  #[tokio::test]
+  #[serial]
+  async fn test_list_created_by() -> LemmyResult<()> {
+    let pool = &build_db_pool_for_tests();
+    let pool = &mut pool.into();
+
+    let inserted_instance = Instance::read_or_create(pool, "my_domain.tld").await?;
+    let form = PersonInsertForm::test_form(inserted_instance.id, "creator_community");
+    let creator = Person::create(pool, &form).await?;
+    let form = PersonInsertForm::test_form(inserted_instance.id, "other_community");
+    let other = Person::create(pool, &form).await?;
+
+    let created_form = |name: &str| CommunityInsertForm {
+      creator_id: Some(creator.id),
+      ..CommunityInsertForm::new(inserted_instance.id, name.into(), "pubkey".to_string())
+    };
+    let created = Community::create(pool, &created_form("created_1")).await?;
+    let deleted = Community::create(pool, &created_form("created_deleted")).await?;
+    let form = CommunityUpdateForm {
+      deleted: Some(true),
+      ..Default::default()
+    };
+    Community::update(pool, deleted.id, &form).await?;
+    // No creator recorded
+    let form = CommunityInsertForm::new(
+      inserted_instance.id,
+      "uncredited".into(),
+      "pubkey".to_string(),
+    );
+    Community::create(pool, &form).await?;
+
+    let ids = |list: Vec<Community>| list.iter().map(|c| c.id).collect::<Vec<_>>();
+
+    // Others don't see the deleted one
+    let list = Community::list_created_by(pool, creator.id, Some(other.id), false).await?;
+    assert_eq!(vec![created.id], ids(list));
+    let list = Community::list_created_by(pool, creator.id, None, false).await?;
+    assert_eq!(vec![created.id], ids(list));
+    // The creator does
+    let list = Community::list_created_by(pool, creator.id, Some(creator.id), false).await?;
+    assert_eq!(vec![created.id, deleted.id], ids(list));
+    assert!(
+      Community::list_created_by(pool, other.id, None, false)
+        .await?
+        .is_empty()
+    );
+
+    // Deleting the creator keeps the community, without a creator
+    Person::delete(pool, creator.id).await?;
+    let after = Community::read(pool, created.id).await?;
+    assert_eq!(None, after.creator_id);
+
+    Instance::delete(pool, inserted_instance.id).await?;
 
     Ok(())
   }

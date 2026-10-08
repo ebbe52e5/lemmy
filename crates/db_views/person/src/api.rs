@@ -1,5 +1,9 @@
 use crate::PersonView;
-use lemmy_db_schema::{PersonListingType, PersonSortType, source::site::Site};
+use lemmy_db_schema::{
+  PersonListingType,
+  PersonSortType,
+  source::{community::Community, site::Site},
+};
 use lemmy_db_schema_file::{PersonId, newtypes::CommunityId};
 use lemmy_db_views_community::MultiCommunityView;
 use lemmy_db_views_community_moderator::CommunityModeratorView;
@@ -91,6 +95,9 @@ pub struct GetPersonDetailsResponse {
   pub site: Option<Site>,
   pub moderates: Vec<CommunityModeratorView>,
   pub multi_communities_created: Vec<MultiCommunityView>,
+  /// The communities this person created. Only sent by the zhifou.io Lemmy fork, which started
+  /// recording creators, so older communities aren't included.
+  pub communities_created: Vec<Community>,
 }
 
 #[skip_serializing_none]
