@@ -23,7 +23,7 @@ use lemmy_db_schema::{
     community::CommunityActions,
     local_site::LocalSite,
     local_user::LocalUser,
-    multi_community::MultiCommunityEntry,
+    multi_community::{MultiCommunityEntry, MultiCommunityPersonEntry},
     person::{Person, PersonFollow},
     post::{Post, PostActions, post_actions_keys as pa_key, post_keys as key},
     site::Site,
@@ -407,6 +407,22 @@ impl PostQuery<'_> {
     Ok(Some((person_ids, community_ids)))
   }
 
+  /// When listing a multi-community, pre-fetches the ids of the people in it (zhifou.io Lemmy
+  /// fork). Their posts are shown along with the posts in its communities.
+  ///
+  /// Returns None when not listing a multi-community, or when it has no people, so the plain
+  /// community filter applies.
+  async fn prefetch_multi_community_persons(
+    &self,
+    pool: &mut DbPool<'_>,
+  ) -> LemmyResult<Option<Vec<PersonId>>> {
+    let Some(multi_community_id) = self.multi_community_id else {
+      return Ok(None);
+    };
+    let person_ids = MultiCommunityPersonEntry::list_person_ids(pool, multi_community_id).await?;
+    Ok(Some(person_ids).filter(|ids| !ids.is_empty()))
+  }
+
   pub async fn list(
     self,
     pool: &mut DbPool<'_>,
@@ -416,6 +432,7 @@ impl PostQuery<'_> {
     // Pre-fetching some important items, to prevent costly joins.
     let community_ids = self.prefetch_community_ids(pool, local_site).await?;
     let following = self.prefetch_following(pool).await?;
+    let multi_community_persons = self.prefetch_multi_community_persons(pool).await?;
     let language_ids = LocalUserLanguage::read_opt(pool, self.local_user.map(|l| l.id)).await?;
 
     let limit = limit_fetch(self.limit, None)?;
@@ -447,9 +464,18 @@ impl PostQuery<'_> {
         .filter(post::scheduled_publish_time_at.is_null());
     }
 
-    //  Filter by the given community ids, prefetched above
+    //  Filter by the given community ids, prefetched above. A multi-community's people (zhifou.io
+    //  Lemmy fork) add their posts in any community.
     if let Some(community_ids) = &community_ids {
-      query = query.filter(post::community_id.eq_any(community_ids));
+      if let Some(person_ids) = &multi_community_persons {
+        query = query.filter(
+          post::community_id
+            .eq_any(community_ids)
+            .or(post::creator_id.eq_any(person_ids)),
+        );
+      } else {
+        query = query.filter(post::community_id.eq_any(community_ids));
+      }
     }
 
     // Following: posts by followed people or in followed multi-communities' communities. Empty

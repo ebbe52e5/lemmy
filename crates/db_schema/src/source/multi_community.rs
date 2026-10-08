@@ -7,6 +7,7 @@ use lemmy_db_schema_file::schema::{
   multi_community,
   multi_community_entry,
   multi_community_follow,
+  multi_community_person_entry,
 };
 use lemmy_db_schema_file::{
   InstanceId,
@@ -140,4 +141,27 @@ pub struct MultiCommunityEntry {
 pub struct MultiCommunityEntryForm {
   pub multi_community_id: MultiCommunityId,
   pub community_id: CommunityId,
+}
+
+/// A local person in a multi-community: their posts are shown in its feed. Only in the zhifou.io
+/// Lemmy fork, and not federated.
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "full", derive(Queryable, Selectable, Identifiable))]
+#[cfg_attr(feature = "full", diesel(table_name = multi_community_person_entry))]
+#[cfg_attr(feature = "full", diesel(primary_key(multi_community_id, person_id)))]
+#[cfg_attr(feature = "full", diesel(check_for_backend(diesel::pg::Pg)))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-rs", ts(optional_fields, export))]
+pub struct MultiCommunityPersonEntry {
+  pub multi_community_id: MultiCommunityId,
+  pub person_id: PersonId,
+  pub published_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, derive_new::new)]
+#[cfg_attr(feature = "full", derive(Insertable, AsChangeset))]
+#[cfg_attr(feature = "full", diesel(table_name = multi_community_person_entry))]
+pub struct MultiCommunityPersonEntryForm {
+  pub multi_community_id: MultiCommunityId,
+  pub person_id: PersonId,
 }

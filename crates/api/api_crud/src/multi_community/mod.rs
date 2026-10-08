@@ -9,7 +9,10 @@ use lemmy_utils::error::{LemmyErrorType, LemmyResult};
 
 pub mod create;
 pub mod create_entry;
+// zhifou.io Lemmy fork: people as multi-community entries
+pub mod create_person_entry;
 pub mod delete_entry;
+pub mod delete_person_entry;
 pub mod list;
 pub mod update;
 

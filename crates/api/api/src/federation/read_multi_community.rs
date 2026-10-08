@@ -2,6 +2,7 @@ use crate::federation::fetcher::resolve_multi_community_identifier;
 use activitypub_federation::config::Data;
 use actix_web::web::{Json, Query};
 use lemmy_api_utils::{context::LemmyContext, utils::check_private_instance};
+use lemmy_db_schema::source::multi_community::MultiCommunityPersonEntry;
 use lemmy_db_views_community::{
   MultiCommunityView,
   api::{GetMultiCommunity, GetMultiCommunityResponse},
@@ -38,8 +39,12 @@ pub async fn read_multi_community(
   .await?
   .items;
 
+  // People entries are only in the zhifou.io Lemmy fork
+  let persons = MultiCommunityPersonEntry::list_persons(&mut context.pool(), id).await?;
+
   Ok(Json(GetMultiCommunityResponse {
     multi_community_view,
     communities,
+    persons,
   }))
 }

@@ -3,7 +3,7 @@ use lemmy_db_schema::{
   CommunitySortType,
   MultiCommunityListingType,
   MultiCommunitySortType,
-  source::site::Site,
+  source::{person::Person, site::Site},
 };
 use lemmy_db_schema_file::{
   PersonId,
@@ -276,6 +276,15 @@ pub struct CreateOrDeleteMultiCommunityEntry {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ts-rs", ts(optional_fields, export))]
+/// Add or remove a local person in a multi-community (zhifou.io Lemmy fork, not federated).
+pub struct CreateOrDeleteMultiCommunityPersonEntry {
+  pub id: MultiCommunityId,
+  pub person_id: PersonId,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-rs", ts(optional_fields, export))]
 pub struct ListMultiCommunities {
   pub type_: Option<MultiCommunityListingType>,
   pub sort: Option<MultiCommunitySortType>,
@@ -303,6 +312,8 @@ pub struct GetMultiCommunity {
 pub struct GetMultiCommunityResponse {
   pub multi_community_view: MultiCommunityView,
   pub communities: Vec<CommunityView>,
+  /// The local people in this multi-community. Only sent by the zhifou.io Lemmy fork.
+  pub persons: Vec<Person>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

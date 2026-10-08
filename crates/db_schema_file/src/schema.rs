@@ -623,6 +623,14 @@ diesel::table! {
 }
 
 diesel::table! {
+    multi_community_person_entry (multi_community_id, person_id) {
+        multi_community_id -> Int4,
+        person_id -> Int4,
+        published_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
     use diesel::sql_types::*;
     use super::sql_types::NotificationTypeEnum;
 
@@ -1053,6 +1061,8 @@ diesel::joinable!(multi_community_entry -> community (community_id));
 diesel::joinable!(multi_community_entry -> multi_community (multi_community_id));
 diesel::joinable!(multi_community_follow -> multi_community (multi_community_id));
 diesel::joinable!(multi_community_follow -> person (person_id));
+diesel::joinable!(multi_community_person_entry -> multi_community (multi_community_id));
+diesel::joinable!(multi_community_person_entry -> person (person_id));
 diesel::joinable!(notification -> comment (comment_id));
 diesel::joinable!(notification -> community (community_id));
 diesel::joinable!(notification -> instance (instance_id));
@@ -1124,6 +1134,7 @@ diesel::allow_tables_to_appear_in_same_query!(
   multi_community,
   multi_community_entry,
   multi_community_follow,
+  multi_community_person_entry,
   notification,
   oauth_account,
   oauth_provider,

@@ -32,7 +32,13 @@ use lemmy_db_schema::{
     language::Language,
     local_site::{LocalSite, LocalSiteUpdateForm},
     local_user::{LocalUser, LocalUserInsertForm, LocalUserUpdateForm},
-    multi_community::{MultiCommunity, MultiCommunityFollowForm, MultiCommunityInsertForm},
+    multi_community::{
+      MultiCommunity,
+      MultiCommunityFollowForm,
+      MultiCommunityInsertForm,
+      MultiCommunityPersonEntry,
+      MultiCommunityPersonEntryForm,
+    },
     person::{
       Person,
       PersonActions,
@@ -2544,6 +2550,115 @@ async fn post_listing_following(data: &mut Data) -> LemmyResult<()> {
   .list(pool, &data.site, &data.local_site)
   .await?;
   assert!(listing.is_empty());
+
+  Ok(())
+}
+
+/// People in a multi-community (zhifou.io Lemmy fork) add their posts in any community to its
+/// feed, but not to its followers' Following feed.
+#[test_context(Data)]
+#[tokio::test]
+#[serial]
+async fn post_listing_multi_community_persons(data: &mut Data) -> LemmyResult<()> {
+  let pool = &data.pool();
+  let pool = &mut pool.into();
+
+  let form = CommunityInsertForm::new(
+    data.instance.id,
+    "multi_persons_community_a".to_string(),
+    "pubkey".to_string(),
+  );
+  let community_a = Community::create(pool, &form).await?;
+  let form = CommunityInsertForm::new(
+    data.instance.id,
+    "multi_persons_community_b".to_string(),
+    "pubkey".to_string(),
+  );
+  let community_b = Community::create(pool, &form).await?;
+  let form = PersonInsertForm::test_form(data.instance.id, "multi_entry_person");
+  let entry_person = Person::create(pool, &form).await?;
+
+  // The multi-community has community_a and entry_person
+  let form = MultiCommunityInsertForm::new(
+    data.tegan.person.id,
+    data.tegan.person.instance_id,
+    "persons multi".to_string(),
+    String::new(),
+  );
+  let multi = MultiCommunity::create(pool, &form).await?;
+  MultiCommunity::update_entries(pool, multi.id, &vec![community_a.id]).await?;
+
+  let form = PostInsertForm::new(
+    "john in community_a".to_string(),
+    data.john.person.id,
+    community_a.id,
+  );
+  let post_in_community = Post::create(pool, &form).await?;
+  let form = PostInsertForm::new(
+    "entry person in community_b".to_string(),
+    entry_person.id,
+    community_b.id,
+  );
+  let post_by_person = Post::create(pool, &form).await?;
+  // Matches neither
+  let form = PostInsertForm::new(
+    "bot in community_b".to_string(),
+    data.bot.person.id,
+    community_b.id,
+  );
+  Post::create(pool, &form).await?;
+
+  let multi_query = PostQuery {
+    multi_community_id: Some(multi.id),
+    ..Default::default()
+  };
+  let list_ids = |listing: &[PostView]| listing.iter().map(|p| p.post.id).collect::<HashSet<_>>();
+
+  // Without people, only the community's posts are listed
+  let listing = multi_query
+    .clone()
+    .list(pool, &data.site, &data.local_site)
+    .await?;
+  assert_eq!(HashSet::from([post_in_community.id]), list_ids(&listing));
+
+  let entry_form = MultiCommunityPersonEntryForm::new(multi.id, entry_person.id);
+  MultiCommunityPersonEntry::create(pool, &entry_form).await?;
+
+  let listing = multi_query
+    .clone()
+    .list(pool, &data.site, &data.local_site)
+    .await?;
+  assert_eq!(
+    HashSet::from([post_in_community.id, post_by_person.id]),
+    list_ids(&listing)
+  );
+
+  // Following a multi-community doesn't follow the people in it
+  MultiCommunity::follow(
+    pool,
+    &MultiCommunityFollowForm {
+      multi_community_id: multi.id,
+      person_id: data.john.person.id,
+      follow_state: CommunityFollowerState::Accepted,
+    },
+  )
+  .await?;
+  let following = PostQuery {
+    listing_type: Some(ListingType::Following),
+    local_user: Some(&data.john.local_user),
+    ..Default::default()
+  }
+  .list(pool, &data.site, &data.local_site)
+  .await?;
+  let following_ids = list_ids(&following);
+  assert!(following_ids.contains(&post_in_community.id));
+  assert!(!following_ids.contains(&post_by_person.id));
+
+  MultiCommunityPersonEntry::delete(pool, &entry_form).await?;
+  let listing = multi_query.list(pool, &data.site, &data.local_site).await?;
+  assert_eq!(HashSet::from([post_in_community.id]), list_ids(&listing));
+
+  Person::delete(pool, entry_person.id).await?;
 
   Ok(())
 }

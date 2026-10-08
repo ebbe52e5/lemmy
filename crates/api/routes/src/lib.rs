@@ -132,7 +132,9 @@ use lemmy_api_crud::{
   multi_community::{
     create::create_multi_community,
     create_entry::create_multi_community_entry,
+    create_person_entry::create_multi_community_person_entry,
     delete_entry::delete_multi_community_entry,
+    delete_person_entry::delete_multi_community_person_entry,
     list::list_multi_communities,
     update::edit_multi_community,
   },
@@ -260,6 +262,15 @@ pub fn config(cfg: &mut ServiceConfig, rate_limit: &RateLimit) {
           .route("", get().to(read_multi_community))
           .route("/entry", post().to(create_multi_community_entry))
           .route("/entry", delete().to(delete_multi_community_entry))
+          // zhifou.io Lemmy fork: people as entries
+          .route(
+            "/person_entry",
+            post().to(create_multi_community_person_entry),
+          )
+          .route(
+            "/person_entry",
+            delete().to(delete_multi_community_person_entry),
+          )
           .route("/list", get().to(list_multi_communities))
           .route("/follow", post().to(follow_multi_community)),
       )

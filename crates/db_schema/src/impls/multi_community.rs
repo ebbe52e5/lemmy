@@ -9,8 +9,11 @@ use crate::{
       MultiCommunityFollow,
       MultiCommunityFollowForm,
       MultiCommunityInsertForm,
+      MultiCommunityPersonEntry,
+      MultiCommunityPersonEntryForm,
       MultiCommunityUpdateForm,
     },
+    person::Person,
   },
   traits::ApubActor,
   utils::format_actor_url,
@@ -33,6 +36,7 @@ use lemmy_db_schema_file::{
     multi_community,
     multi_community_entry,
     multi_community_follow,
+    multi_community_person_entry,
     person,
   },
 };
@@ -384,6 +388,92 @@ impl MultiCommunityEntry {
   }
 }
 
+/// People in multi-communities. Only in the zhifou.io Lemmy fork: these entries aren't
+/// federated, and have their own entry limit, separate from the communities'.
+impl MultiCommunityPersonEntry {
+  pub async fn create(
+    pool: &mut DbPool<'_>,
+    form: &MultiCommunityPersonEntryForm,
+  ) -> LemmyResult<Self> {
+    let conn = &mut get_conn(pool).await?;
+
+    insert_into(multi_community_person_entry::table)
+      .values(form)
+      .get_result(conn)
+      .await
+      .with_lemmy_type(LemmyErrorType::CouldntCreate)
+  }
+
+  pub async fn delete(
+    pool: &mut DbPool<'_>,
+    form: &MultiCommunityPersonEntryForm,
+  ) -> LemmyResult<usize> {
+    let conn = &mut get_conn(pool).await?;
+
+    delete(
+      multi_community_person_entry::table
+        .filter(multi_community_person_entry::multi_community_id.eq(form.multi_community_id))
+        .filter(multi_community_person_entry::person_id.eq(form.person_id)),
+    )
+    .execute(conn)
+    .await
+    .with_lemmy_type(LemmyErrorType::Deleted)
+  }
+
+  /// Make sure you aren't trying to insert more people than the entry limit allows.
+  pub async fn check_entry_limit(
+    pool: &mut DbPool<'_>,
+    multi_community_id: MultiCommunityId,
+  ) -> LemmyResult<()> {
+    let conn = &mut get_conn(pool).await?;
+
+    let count: i64 = multi_community_person_entry::table
+      .filter(multi_community_person_entry::multi_community_id.eq(multi_community_id))
+      .count()
+      .get_result(conn)
+      .await?;
+
+    if count >= MULTI_COMMUNITY_ENTRY_LIMIT.into() {
+      Err(LemmyErrorType::MultiCommunityEntryLimitReached.into())
+    } else {
+      Ok(())
+    }
+  }
+
+  /// The people in a multi-community, oldest entry first. Deleted accounts are left out.
+  pub async fn list_persons(
+    pool: &mut DbPool<'_>,
+    id: MultiCommunityId,
+  ) -> LemmyResult<Vec<Person>> {
+    let conn = &mut get_conn(pool).await?;
+
+    multi_community_person_entry::table
+      .inner_join(person::table)
+      .filter(multi_community_person_entry::multi_community_id.eq(id))
+      .filter(person::deleted.eq(false))
+      .order_by(multi_community_person_entry::published_at)
+      .select(Person::as_select())
+      .get_results(conn)
+      .await
+      .with_lemmy_type(LemmyErrorType::NotFound)
+  }
+
+  pub async fn list_person_ids(
+    pool: &mut DbPool<'_>,
+    id: MultiCommunityId,
+  ) -> LemmyResult<Vec<PersonId>> {
+    let conn = &mut get_conn(pool).await?;
+
+    multi_community_person_entry::table
+      .filter(multi_community_person_entry::multi_community_id.eq(id))
+      .order_by(multi_community_person_entry::published_at)
+      .select(multi_community_person_entry::person_id)
+      .get_results(conn)
+      .await
+      .with_lemmy_type(LemmyErrorType::NotFound)
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -481,6 +571,56 @@ mod tests {
     let after_accepted_follow = MultiCommunity::read(pool, data.multi.id).await?;
     assert_eq!(1, after_accepted_follow.subscribers);
     assert_eq!(1, after_accepted_follow.subscribers_local);
+
+    Instance::delete(pool, data.instance.id).await?;
+
+    Ok(())
+  }
+
+  /// People entries are only in the zhifou.io Lemmy fork.
+  #[tokio::test]
+  #[serial]
+  async fn test_person_entries() -> LemmyResult<()> {
+    let pool = &build_db_pool_for_tests();
+    let pool = &mut pool.into();
+    let data = setup(pool).await?;
+
+    let entry_form = MultiCommunityPersonEntryForm::new(data.multi.id, data.person.id);
+    MultiCommunityPersonEntry::create(pool, &entry_form).await?;
+    assert_eq!(
+      vec![data.person.id],
+      MultiCommunityPersonEntry::list_person_ids(pool, data.multi.id).await?
+    );
+    let persons = MultiCommunityPersonEntry::list_persons(pool, data.multi.id).await?;
+    assert_eq!(
+      vec![data.person.id],
+      persons.iter().map(|p| p.id).collect::<Vec<_>>()
+    );
+    // People don't count towards the communities count
+    let after_insert = MultiCommunity::read(pool, data.multi.id).await?;
+    assert_eq!(0, after_insert.communities);
+
+    MultiCommunityPersonEntry::delete(pool, &entry_form).await?;
+    assert!(
+      MultiCommunityPersonEntry::list_person_ids(pool, data.multi.id)
+        .await?
+        .is_empty()
+    );
+
+    // Fill the people limit. The communities limit is separate, so it isn't reached.
+    for i in 0..MULTI_COMMUNITY_ENTRY_LIMIT {
+      let form = PersonInsertForm::test_form(data.instance.id, &format!("entry_{i}"));
+      let person = Person::create(pool, &form).await?;
+      MultiCommunityPersonEntry::check_entry_limit(pool, data.multi.id).await?;
+      let form = MultiCommunityPersonEntryForm::new(data.multi.id, person.id);
+      MultiCommunityPersonEntry::create(pool, &form).await?;
+    }
+    assert!(
+      MultiCommunityPersonEntry::check_entry_limit(pool, data.multi.id)
+        .await
+        .is_err()
+    );
+    MultiCommunityEntry::check_entry_limit(pool, data.multi.id).await?;
 
     Instance::delete(pool, data.instance.id).await?;
 

@@ -129,6 +129,8 @@ pub enum LemmyErrorType {
   MultiCommunityUpdateWrongUser,
   CannotCombineCommunityIdAndMultiCommunityId,
   MultiCommunityEntryLimitReached,
+  /// Only local people can be added to a multi-community (zhifou.io Lemmy fork).
+  MultiCommunityPersonNotLocal,
   TooManyRequests,
   ResolveObjectFailed(String),
   #[serde(untagged)]
