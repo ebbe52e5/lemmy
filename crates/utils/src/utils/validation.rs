@@ -27,6 +27,10 @@ const MIN_LENGTH_BLOCKING_KEYWORD: usize = 3;
 const MAX_LENGTH_BLOCKING_KEYWORD: usize = 50;
 const ACTOR_NAME_MAX_LENGTH: usize = 20;
 pub const DISPLAY_NAME_MAX_LENGTH: usize = 50;
+/// The zhifou.io Lemmy fork lowers this from upstream's 3, so two-character Chinese names (users,
+/// communities and multi-communities) are allowed.
+const DISPLAY_NAME_MIN_VISIBLE_CHARS: usize = 2;
+const POST_TITLE_MIN_VISIBLE_CHARS: usize = 3;
 
 fn has_newline(name: &str) -> bool {
   name.contains('\n')
@@ -50,20 +54,14 @@ pub fn is_valid_actor_name(name: &str) -> LemmyResult<()> {
   }
 }
 
-fn has_3_permitted_display_chars(name: &str) -> bool {
-  let mut num_non_fdc: i8 = 0;
-  for c in name.chars() {
-    if !INVISIBLE_CHARS.contains(&c) {
-      num_non_fdc += 1;
-      if num_non_fdc >= 3 {
-        break;
-      }
-    }
-  }
-  if num_non_fdc >= 3 {
-    return true;
-  }
-  false
+/// Whether the name has at least `min` characters that aren't invisible.
+fn has_permitted_display_chars(name: &str, min: usize) -> bool {
+  name
+    .chars()
+    .filter(|c| !INVISIBLE_CHARS.contains(c))
+    .take(min)
+    .count()
+    >= min
 }
 
 // Can't do a regex here, reverse lookarounds not supported
@@ -72,7 +70,7 @@ pub fn is_valid_display_name(name: &str) -> LemmyResult<()> {
     && !name.starts_with(INVISIBLE_CHARS)
     && name.chars().count() <= DISPLAY_NAME_MAX_LENGTH
     && !has_newline(name)
-    && has_3_permitted_display_chars(name);
+    && has_permitted_display_chars(name, DISPLAY_NAME_MIN_VISIBLE_CHARS);
   if !check {
     Err(LemmyErrorType::InvalidDisplayName.into())
   } else {
@@ -91,8 +89,9 @@ pub fn is_valid_matrix_id(matrix_id: &str) -> LemmyResult<()> {
 
 pub fn is_valid_post_title(title: &str) -> LemmyResult<()> {
   let length = title.trim().chars().count();
-  let check =
-    (3..=200).contains(&length) && !has_newline(title) && has_3_permitted_display_chars(title);
+  let check = (3..=200).contains(&length)
+    && !has_newline(title)
+    && has_permitted_display_chars(title, POST_TITLE_MIN_VISIBLE_CHARS);
   if !check {
     Err(LemmyErrorType::InvalidPostTitle.into())
   } else {
@@ -335,6 +334,7 @@ mod tests {
     error::{LemmyErrorType, LemmyResult},
     utils::validation::{
       BIO_MAX_LENGTH,
+      DISPLAY_NAME_MAX_LENGTH,
       SITE_NAME_MAX_LENGTH,
       SITE_SUMMARY_MAX_LENGTH,
       URL_MAX_LENGTH,
@@ -400,6 +400,13 @@ Line3",
   #[test]
   fn test_valid_display_name() {
     assert!(is_valid_display_name("hello @there").is_ok());
+    // Two visible characters are enough (zhifou.io Lemmy fork), one isn't
+    assert!(is_valid_display_name("易经").is_ok());
+    assert!(is_valid_display_name("ab").is_ok());
+    assert!(is_valid_display_name("易").is_err());
+    assert!(is_valid_display_name("a\u{200b}").is_err());
+    assert!(is_valid_display_name(&"易".repeat(DISPLAY_NAME_MAX_LENGTH)).is_ok());
+    assert!(is_valid_display_name(&"易".repeat(DISPLAY_NAME_MAX_LENGTH + 1)).is_err());
     assert!(is_valid_display_name("@hello there").is_err());
     assert!(is_valid_display_name("\u{200d}hello").is_err());
     assert!(is_valid_display_name("\u{1f3f3}\u{fe0f}\u{200d}\u{26a7}\u{fe0f}Name").is_ok());
