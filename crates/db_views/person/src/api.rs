@@ -4,7 +4,10 @@ use lemmy_db_schema::{
   PersonSortType,
   source::{community::Community, site::Site},
 };
-use lemmy_db_schema_file::{PersonId, newtypes::CommunityId};
+use lemmy_db_schema_file::{
+  PersonId,
+  newtypes::{CommunityId, MultiCommunityId},
+};
 use lemmy_db_views_community::MultiCommunityView;
 use lemmy_db_views_community_moderator::CommunityModeratorView;
 use lemmy_diesel_utils::pagination::PaginationCursor;
@@ -131,6 +134,9 @@ pub struct ListPersons {
   pub search_term: Option<String>,
   pub search_title_only: Option<bool>,
   pub community_id: Option<CommunityId>,
+  /// Only in the zhifou.io Lemmy fork: returns the followers of a multi-community.
+  /// Works only for its creator, and admins of a local multi-community.
+  pub multi_community_id: Option<MultiCommunityId>,
   pub page_cursor: Option<PaginationCursor>,
   pub limit: Option<i64>,
 }

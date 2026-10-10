@@ -20,6 +20,7 @@ use lemmy_db_schema::{
     local_site_url_blocklist::LocalSiteUrlBlocklist,
     login_token::LoginToken,
     modlog::{Modlog, ModlogInsertForm},
+    multi_community::MultiCommunity,
     oauth_account::OAuthAccount,
     person::{Person, PersonUpdateForm},
     post::{Post, PostActions, PostLikeForm, PostReadCommentsForm},
@@ -110,6 +111,20 @@ pub async fn is_mod_or_admin_opt(
     }
   } else {
     Err(LemmyErrorType::NotAModOrAdmin.into())
+  }
+}
+
+/// Check that current user is creator of multi-comm and can modify it.
+pub fn check_multi_community_creator(
+  multi: &MultiCommunity,
+  local_user_view: &LocalUserView,
+) -> LemmyResult<()> {
+  if multi.local && local_user_view.local_user.admin {
+    Ok(())
+  } else if multi.creator_id != local_user_view.person.id {
+    Err(LemmyErrorType::MultiCommunityUpdateWrongUser.into())
+  } else {
+    Ok(())
   }
 }
 

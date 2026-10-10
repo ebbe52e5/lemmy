@@ -30,8 +30,8 @@ use lemmy_db_schema_file::{
     my_person_follow_join,
     person_community_actions_join,
   },
-  newtypes::CommunityId,
-  schema::{community_actions, local_user, person},
+  newtypes::{CommunityId, MultiCommunityId},
+  schema::{community_actions, local_user, multi_community_follow, person},
 };
 use lemmy_diesel_utils::{
   connection::{DbPool, get_conn},
@@ -136,6 +136,8 @@ pub struct PersonQuery<'a> {
   pub search_term: Option<String>,
   pub search_title_only: Option<bool>,
   pub community_id: Option<CommunityId>,
+  /// Only in the zhifou.io Lemmy fork: list the followers of a multi-community
+  pub multi_community_id: Option<MultiCommunityId>,
   pub page_cursor: Option<PaginationCursor>,
   pub limit: Option<i64>,
 }
@@ -165,6 +167,14 @@ impl PersonQuery<'_> {
           .eq(CommunityFollowerState::Accepted)
           .or(community_actions::received_ban_at.is_not_null()),
       )
+    }
+
+    if let Some(multi_community_id) = self.multi_community_id {
+      let follower_ids = multi_community_follow::table
+        .filter(multi_community_follow::multi_community_id.eq(multi_community_id))
+        .filter(multi_community_follow::follow_state.eq(CommunityFollowerState::Accepted))
+        .select(multi_community_follow::person_id);
+      query = query.filter(person::id.eq_any(follower_ids));
     }
 
     if let Some(listing_type) = self.listing_type {
@@ -231,6 +241,7 @@ mod tests {
       },
       instance::Instance,
       local_user::{LocalUser, LocalUserInsertForm, LocalUserUpdateForm},
+      multi_community::{MultiCommunity, MultiCommunityFollowForm, MultiCommunityInsertForm},
       person::{Person, PersonActions, PersonInsertForm, PersonNoteForm, PersonUpdateForm},
       post::{Post, PostActions, PostInsertForm, PostLikeForm},
       site::SiteInsertForm,
@@ -503,6 +514,55 @@ mod tests {
         .and_then(|ca| ca.received_ban_at)
         .is_some()
     );
+    cleanup(data, pool).await?;
+    Ok(())
+  }
+
+  /// Multi-community follower lists are only in the zhifou.io Lemmy fork.
+  #[tokio::test]
+  #[serial]
+  async fn list_multi_community_followers_test() -> LemmyResult<()> {
+    let pool = &build_db_pool_for_tests();
+    let pool = &mut pool.into();
+    let data = init_data(pool).await?;
+
+    let multi_form = MultiCommunityInsertForm::new(
+      data.alice.id,
+      data.alice.instance_id,
+      "alices_multi".to_string(),
+      String::new(),
+    );
+    let multi = MultiCommunity::create(pool, &multi_form).await?;
+
+    let list_followers = async |pool: &mut DbPool<'_>| {
+      PersonQuery {
+        multi_community_id: Some(multi.id),
+        ..Default::default()
+      }
+      .list(&data.site, pool)
+      .await
+    };
+
+    // A pending follow isn't listed
+    let mut follow_form = MultiCommunityFollowForm {
+      multi_community_id: multi.id,
+      person_id: data.bob.id,
+      follow_state: CommunityFollowerState::Pending,
+    };
+    MultiCommunity::follow(pool, &follow_form).await?;
+    assert_length!(0, list_followers(pool).await?);
+
+    // An accepted follow is, and nobody else
+    follow_form.follow_state = CommunityFollowerState::Accepted;
+    MultiCommunity::follow(pool, &follow_form).await?;
+    let followers = list_followers(pool).await?;
+    assert_length!(1, followers);
+    assert_eq!(data.bob.id, followers[0].person.id);
+
+    // After unfollowing, bob isn't listed anymore
+    MultiCommunity::unfollow(pool, data.bob.id, multi.id).await?;
+    assert_length!(0, list_followers(pool).await?);
+
     cleanup(data, pool).await?;
     Ok(())
   }

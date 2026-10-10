@@ -2,13 +2,14 @@ use activitypub_federation::config::Data;
 use actix_web::web::{Json, Query};
 use lemmy_api_utils::{
   context::LemmyContext,
-  utils::{check_private_instance, is_mod_or_admin_opt},
+  utils::{check_multi_community_creator, check_private_instance, is_mod_or_admin_opt},
 };
+use lemmy_db_schema::source::multi_community::MultiCommunity;
 use lemmy_db_views_local_user::LocalUserView;
 use lemmy_db_views_person::{PersonView, api::ListPersons, impls::PersonQuery};
 use lemmy_db_views_site::SiteView;
-use lemmy_diesel_utils::pagination::PagedResponse;
-use lemmy_utils::error::LemmyResult;
+use lemmy_diesel_utils::{pagination::PagedResponse, traits::Crud};
+use lemmy_utils::error::{LemmyErrorType, LemmyResult};
 
 pub async fn list_persons(
   Query(data): Query<ListPersons>,
@@ -33,6 +34,16 @@ pub async fn list_persons(
     .await?;
   }
 
+  // zhifou.io Lemmy fork: if multi_community_id is some, returns multi-community followers.
+  // Works only for the same users who can edit the multi-community.
+  if let Some(multi_community_id) = data.multi_community_id {
+    let local_user_view = local_user_view
+      .as_ref()
+      .ok_or(LemmyErrorType::NotAModOrAdmin)?;
+    let multi = MultiCommunity::read(&mut context.pool(), multi_community_id).await?;
+    check_multi_community_creator(&multi, local_user_view)?;
+  }
+
   let res = PersonQuery {
     local_user: local_user_view.map(|l| l.local_user).as_ref(),
     sort: data.sort,
@@ -40,6 +51,7 @@ pub async fn list_persons(
     search_term: data.search_term,
     search_title_only: data.search_title_only,
     community_id: data.community_id,
+    multi_community_id: data.multi_community_id,
     limit: data.limit,
     page_cursor: data.page_cursor,
   }

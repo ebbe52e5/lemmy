@@ -109,6 +109,7 @@ pub async fn search(
     local_user,
     listing_type: Some(PersonListingType::All),
     community_id: None,
+    multi_community_id: None,
     sort: Some(PersonSortType::New),
     page_cursor: page_cursors[2].clone(),
     limit,
