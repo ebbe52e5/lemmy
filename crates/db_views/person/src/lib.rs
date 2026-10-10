@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use lemmy_db_schema::source::{
   community::CommunityActions,
+  multi_community::MultiCommunityFollow,
   person::{Person, PersonActions, PersonFollow},
 };
 use serde::{Deserialize, Serialize};
@@ -59,4 +60,8 @@ pub struct PersonView {
   /// The logged in user's local follow of this person. Check `active` for the current state.
   #[cfg_attr(feature = "full", diesel(embed))]
   pub person_follow: Option<PersonFollow>,
+  /// Only in the zhifou.io Lemmy fork: the person's follow of a multi-community, when listing
+  /// its followers. Like community_actions, it's empty for unrelated queries.
+  #[cfg_attr(feature = "full", diesel(embed))]
+  pub multi_community_follow: Option<MultiCommunityFollow>,
 }

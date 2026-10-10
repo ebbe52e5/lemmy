@@ -108,6 +108,8 @@ pub struct MultiCommunityFollow {
   pub multi_community_id: MultiCommunityId,
   pub person_id: PersonId,
   pub follow_state: CommunityFollowerState,
+  /// Only in the zhifou.io Lemmy fork. None for follows from before it was recorded.
+  pub followed_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone)]

@@ -9,7 +9,7 @@ use crate::{
     creator_local_user,
     my_instance_persons_actions,
   },
-  newtypes::CommunityId,
+  newtypes::{CommunityId, MultiCommunityId},
   schema::{
     comment,
     comment_actions,
@@ -211,6 +211,17 @@ pub fn creator_community_actions_join() -> _ {
           .field(community_actions::community_id)
           .eq(community::id),
       ),
+  )
+}
+
+/// Only in the zhifou.io Lemmy fork: a person's follow of a multi-community
+#[diesel::dsl::auto_type]
+pub fn person_multi_community_follow_join(multi_community_id: Option<MultiCommunityId>) -> _ {
+  multi_community_follow::table.on(
+    multi_community_follow::multi_community_id
+      .nullable()
+      .eq(multi_community_id)
+      .and(multi_community_follow::person_id.eq(person::id)),
   )
 }
 

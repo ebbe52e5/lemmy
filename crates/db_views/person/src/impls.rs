@@ -29,6 +29,7 @@ use lemmy_db_schema_file::{
     my_person_actions_join,
     my_person_follow_join,
     person_community_actions_join,
+    person_multi_community_follow_join,
   },
   newtypes::{CommunityId, MultiCommunityId},
   schema::{community_actions, local_user, multi_community_follow, person},
@@ -68,6 +69,7 @@ impl PersonView {
     my_person_id: Option<PersonId>,
     local_instance_id: InstanceId,
     community_id: Option<CommunityId>,
+    multi_community_id: Option<MultiCommunityId>,
   ) -> _ {
     let creator_local_instance_actions_join: creator_local_instance_actions_join =
       creator_local_instance_actions_join(local_instance_id);
@@ -75,6 +77,8 @@ impl PersonView {
     let my_person_follow_join: my_person_follow_join = my_person_follow_join(my_person_id);
     let person_community_actions_join: person_community_actions_join =
       person_community_actions_join(community_id);
+    let person_multi_community_follow_join: person_multi_community_follow_join =
+      person_multi_community_follow_join(multi_community_id);
     person::table
       .left_join(local_user::table)
       .left_join(my_person_actions_join)
@@ -82,6 +86,7 @@ impl PersonView {
       .left_join(creator_local_instance_actions_join)
       .left_join(person_community_actions_join)
       .left_join(my_person_follow_join)
+      .left_join(person_multi_community_follow_join)
   }
 
   pub async fn read(
@@ -92,7 +97,7 @@ impl PersonView {
     is_admin: bool,
   ) -> LemmyResult<Self> {
     let conn = &mut get_conn(pool).await?;
-    let mut query = Self::joins(my_person_id, local_instance_id, None)
+    let mut query = Self::joins(my_person_id, local_instance_id, None, None)
       .filter(person::id.eq(person_id))
       .select(Self::as_select())
       .into_boxed();
@@ -114,7 +119,7 @@ impl PersonView {
   ) -> LemmyResult<Vec<PersonView>> {
     let conn = &mut get_conn(pool).await?;
 
-    Self::joins(my_person_id, local_instance_id, None)
+    Self::joins(my_person_id, local_instance_id, None, None)
       .filter(person::deleted.eq(false))
       .filter(local_user::admin)
       // Order by admin created date (ie old)
@@ -155,6 +160,7 @@ impl PersonQuery<'_> {
       self.local_user.person_id(),
       site.instance_id,
       self.community_id,
+      self.multi_community_id,
     )
     .select(PersonView::as_select())
     .limit(limit)
@@ -169,12 +175,9 @@ impl PersonQuery<'_> {
       )
     }
 
-    if let Some(multi_community_id) = self.multi_community_id {
-      let follower_ids = multi_community_follow::table
-        .filter(multi_community_follow::multi_community_id.eq(multi_community_id))
-        .filter(multi_community_follow::follow_state.eq(CommunityFollowerState::Accepted))
-        .select(multi_community_follow::person_id);
-      query = query.filter(person::id.eq_any(follower_ids));
+    if self.multi_community_id.is_some() {
+      query =
+        query.filter(multi_community_follow::follow_state.eq(CommunityFollowerState::Accepted));
     }
 
     if let Some(listing_type) = self.listing_type {
@@ -549,15 +552,23 @@ mod tests {
       person_id: data.bob.id,
       follow_state: CommunityFollowerState::Pending,
     };
-    MultiCommunity::follow(pool, &follow_form).await?;
+    let pending_follow = MultiCommunity::follow(pool, &follow_form).await?;
+    assert!(pending_follow.followed_at.is_some());
     assert_length!(0, list_followers(pool).await?);
 
-    // An accepted follow is, and nobody else
+    // An accepted follow is, and nobody else. It keeps the time of the first follow.
     follow_form.follow_state = CommunityFollowerState::Accepted;
     MultiCommunity::follow(pool, &follow_form).await?;
     let followers = list_followers(pool).await?;
     assert_length!(1, followers);
     assert_eq!(data.bob.id, followers[0].person.id);
+    assert_eq!(
+      pending_follow.followed_at,
+      followers[0]
+        .multi_community_follow
+        .as_ref()
+        .and_then(|f| f.followed_at),
+    );
 
     // After unfollowing, bob isn't listed anymore
     MultiCommunity::unfollow(pool, data.bob.id, multi.id).await?;

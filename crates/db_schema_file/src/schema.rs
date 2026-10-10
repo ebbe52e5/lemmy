@@ -620,6 +620,7 @@ diesel::table! {
         multi_community_id -> Int4,
         person_id -> Int4,
         follow_state -> CommunityFollowerState,
+        followed_at -> Nullable<Timestamptz>,
     }
 }
 
