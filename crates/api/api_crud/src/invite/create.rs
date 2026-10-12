@@ -15,6 +15,10 @@ pub async fn create_invitation(
   context: Data<LemmyContext>,
   local_user_view: LocalUserView,
 ) -> LemmyResult<Json<CreateInvitationResponse>> {
+  // Only admins hand out invites in the zhifou.io Lemmy fork. Upstream lets
+  // every user create up to max_invites_per_user_allowed of them.
+  is_admin(&local_user_view)?;
+
   let pool = &mut context.pool();
 
   let local_user_id = local_user_view.local_user.id;
@@ -48,10 +52,28 @@ pub async fn create_invitation(
   Ok(Json(CreateInvitationResponse { invite }))
 }
 
+/// 8 case-sensitive letters and digits in the zhifou.io Lemmy fork, short
+/// enough to type in. Upstream uses 12.
+const INVITE_TOKEN_LENGTH: usize = 8;
+
 fn generate_invite_token() -> String {
   rand::rng()
     .sample_iter(Alphanumeric)
-    .take(12)
+    .take(INVITE_TOKEN_LENGTH)
     .map(char::from)
     .collect()
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn invite_tokens_are_8_letters_and_digits() {
+    for _ in 0..100 {
+      let token = generate_invite_token();
+      assert_eq!(token.len(), INVITE_TOKEN_LENGTH);
+      assert!(token.chars().all(|c| c.is_ascii_alphanumeric()));
+    }
+  }
 }
