@@ -35,7 +35,7 @@ use lemmy_db_schema_file::{
   schema::{community, local_user, person, post, post_actions},
 };
 use lemmy_diesel_utils::{
-  connection::{DbPool, get_conn},
+  connection::{DbPool, get_conn, get_result_committed},
   dburl::DbUrl,
   traits::Crud,
   utils::{
@@ -56,9 +56,7 @@ impl Crud for Post {
 
   async fn create(pool: &mut DbPool<'_>, form: &Self::InsertForm) -> LemmyResult<Self> {
     let conn = &mut get_conn(pool).await?;
-    insert_into(post::table)
-      .values(form)
-      .get_result::<Self>(conn)
+    get_result_committed(insert_into(post::table).values(form), conn)
       .await
       .with_lemmy_type(LemmyErrorType::CouldntCreate)
   }
@@ -69,11 +67,12 @@ impl Crud for Post {
     new_post: &Self::UpdateForm,
   ) -> LemmyResult<Self> {
     let conn = &mut get_conn(pool).await?;
-    diesel::update(post::table.find(post_id))
-      .set(new_post)
-      .get_result::<Self>(conn)
-      .await
-      .with_lemmy_type(LemmyErrorType::CouldntUpdate)
+    get_result_committed(
+      diesel::update(post::table.find(post_id)).set(new_post),
+      conn,
+    )
+    .await
+    .with_lemmy_type(LemmyErrorType::CouldntUpdate)
   }
   async fn read(pool: &mut DbPool<'_>, id: PostId) -> LemmyResult<Self> {
     let conn = &mut get_conn(pool).await?;
@@ -586,8 +585,12 @@ mod tests {
     utils::RANK_DEFAULT,
   };
   use chrono::DateTime;
+  use diesel_async::SimpleAsyncConnection;
   use diesel_uplete::UpleteCount;
-  use lemmy_diesel_utils::{connection::build_db_pool_for_tests, traits::Crud};
+  use lemmy_diesel_utils::{
+    connection::{build_db_pool_for_tests, get_conn},
+    traits::Crud,
+  };
   use lemmy_utils::error::LemmyResult;
   use pretty_assertions::assert_eq;
   use serial_test::serial;
@@ -931,6 +934,69 @@ mod tests {
     Community::delete(pool, inserted_community.id).await?;
     Instance::delete(pool, inserted_instance.id).await?;
 
+    Ok(())
+  }
+
+  /// A row over 8KB, such as a long body, reaches the client before Postgres commits the insert.
+  /// `Post::create` must still wait for the commit, or a query right after it on another pooled
+  /// connection misses the post (creating long posts failed with `couldnt_update`).
+  #[tokio::test]
+  #[serial]
+  async fn test_create_waits_for_commit() -> LemmyResult<()> {
+    let pool = &build_db_pool_for_tests();
+    let pool = &mut pool.into();
+
+    // Make committing an inserted post slow, so the window before the commit is easy to hit
+    get_conn(pool)
+      .await?
+      .batch_execute(
+        "CREATE FUNCTION slow_commit_for_test() RETURNS trigger LANGUAGE plpgsql AS $$
+           BEGIN PERFORM pg_sleep(0.3); RETURN NULL; END $$;
+         CREATE CONSTRAINT TRIGGER slow_commit_for_test AFTER INSERT ON post
+           DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION slow_commit_for_test();",
+      )
+      .await?;
+
+    let instance = Instance::read_or_create(pool, "my_domain.tld").await?;
+    let person =
+      Person::create(pool, &PersonInsertForm::test_form(instance.id, "longpost")).await?;
+    let community = Community::create(
+      pool,
+      &CommunityInsertForm::new(instance.id, "long_posts".into(), "pubkey".into()),
+    )
+    .await?;
+    let form = PostInsertForm {
+      body: Some("长".repeat(10_000)),
+      ..PostInsertForm::new("A long post".into(), person.id, community.id)
+    };
+    let post = Post::create(pool, &form).await;
+    let updated = match &post {
+      Ok(post) => Some(
+        Post::update(
+          pool,
+          post.id,
+          &PostUpdateForm {
+            embed_title: Some(None),
+            ..Default::default()
+          },
+        )
+        .await,
+      ),
+      Err(_) => None,
+    };
+
+    // Clean up before asserting, so a failure doesn't slow down the other tests
+    get_conn(pool)
+      .await?
+      .batch_execute(
+        "DROP TRIGGER slow_commit_for_test ON post; DROP FUNCTION slow_commit_for_test();",
+      )
+      .await?;
+    Instance::delete(pool, instance.id).await?;
+
+    let post = post?;
+    let updated = updated.transpose()?;
+    assert_eq!(Some(post.id), updated.map(|p| p.id));
     Ok(())
   }
 }

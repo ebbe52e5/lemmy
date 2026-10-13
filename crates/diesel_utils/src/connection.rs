@@ -6,6 +6,8 @@ use diesel::result::{
 };
 use diesel_async::{
   AsyncConnection,
+  RunQueryDsl,
+  methods::LoadQuery,
   pg::AsyncPgConnection,
   pooled_connection::{
     AsyncDieselConnectionManager,
@@ -111,6 +113,27 @@ impl<'a, 'b: 'a> From<&'a mut DbConn<'b>> for DbPool<'a> {
   fn from(value: &'a mut DbConn<'b>) -> Self {
     DbPool::Conn(value.deref_mut())
   }
+}
+
+/// Like diesel-async's `get_result`, but returns only after Postgres has finished the statement.
+///
+/// `get_result` resolves as soon as the first row arrives. Postgres sends a `RETURNING` row before
+/// it commits the statement's implicit transaction if the row doesn't fit in its 8KB send buffer,
+/// for example a post with a long body. A query the caller then runs on another pooled connection
+/// can miss the row because it isn't committed yet: creating a long post failed with
+/// `couldnt_update` ("Record not found") although the post had been created. Collecting all rows
+/// waits for the end of the response, which Postgres only sends after the commit.
+pub fn get_result_committed<'conn, 'query: 'conn, Q, U>(
+  query: Q,
+  conn: &'conn mut AsyncPgConnection,
+) -> impl Future<Output = Result<U, DieselError>> + Send + 'conn
+where
+  Q: LoadQuery<'query, AsyncPgConnection, U> + 'query,
+  U: Send + 'conn,
+{
+  query
+    .get_results(conn)
+    .map(|rows| rows?.into_iter().next().ok_or(DieselError::NotFound))
 }
 
 impl<'a> From<&'a ActualDbPool> for DbPool<'a> {

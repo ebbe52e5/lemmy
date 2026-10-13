@@ -30,7 +30,7 @@ use lemmy_db_schema_file::{
   schema::{comment, comment_actions, community, post},
 };
 use lemmy_diesel_utils::{
-  connection::{DbPool, get_conn},
+  connection::{DbPool, get_conn, get_result_committed},
   dburl::DbUrl,
   traits::Crud,
   utils::functions::{coalesce, hot_rank},
@@ -176,19 +176,18 @@ impl Comment {
     let comment_form = (comment_form, parent_path.map(|p| comment::path.eq(p)));
 
     if let Some(timestamp) = timestamp {
-      insert_into(comment::table)
-        .values(comment_form)
-        .on_conflict(comment::ap_id)
-        .filter_target(coalesce(comment::updated_at, comment::published_at).lt(timestamp))
-        .do_update()
-        .set(comment_form)
-        .get_result::<Self>(conn)
-        .await
+      get_result_committed(
+        insert_into(comment::table)
+          .values(comment_form)
+          .on_conflict(comment::ap_id)
+          .filter_target(coalesce(comment::updated_at, comment::published_at).lt(timestamp))
+          .do_update()
+          .set(comment_form),
+        conn,
+      )
+      .await
     } else {
-      insert_into(comment::table)
-        .values(comment_form)
-        .get_result::<Self>(conn)
-        .await
+      get_result_committed(insert_into(comment::table).values(comment_form), conn).await
     }
     .with_lemmy_type(LemmyErrorType::CouldntCreate)
   }
@@ -338,11 +337,12 @@ impl Crud for Comment {
     comment_form: &Self::UpdateForm,
   ) -> LemmyResult<Self> {
     let conn = &mut get_conn(pool).await?;
-    diesel::update(comment::table.find(comment_id))
-      .set(comment_form)
-      .get_result::<Self>(conn)
-      .await
-      .with_lemmy_type(LemmyErrorType::CouldntUpdate)
+    get_result_committed(
+      diesel::update(comment::table.find(comment_id)).set(comment_form),
+      conn,
+    )
+    .await
+    .with_lemmy_type(LemmyErrorType::CouldntUpdate)
   }
 }
 
